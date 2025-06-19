@@ -148,7 +148,10 @@ document.addEventListener('DOMContentLoaded', () => {
       'Tunggu 5 detik di tab baru, lalu kembali untuk mendapatkan koin';
     addCoinBtn.textContent = '...';
 
-    window.open('https://anekaproject.com/', '_blank');
+    window.open(
+      'https://www.tiktok.com/@denisuryadi26/video/7510544818146168072',
+      '_blank',
+    );
   }
 
   function handleWindowFocus() {
