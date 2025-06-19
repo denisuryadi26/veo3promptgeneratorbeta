@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     backsound: document.getElementById('backsound'),
     kalimat: document.getElementById('kalimat'),
     detail: document.getElementById('detail'),
+    negative: document.getElementById('negative'),
   };
   const generateBtn = document.getElementById('generateBtn');
   const saveCharacterBtn = document.getElementById('saveCharacterBtn');
@@ -376,6 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `kalimat diucapkan dalam Bahasa Indonesia: "${inputs.kalimat.value.trim()}"`
         : '',
       inputs.detail.value,
+      inputs.negative.value ? `Hindari : ${inputs.negative.value}` : '',
     ];
     return promptParts.filter((part) => part && part.trim()).join(', ');
   }
