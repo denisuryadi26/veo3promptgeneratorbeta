@@ -457,7 +457,9 @@ document.addEventListener('DOMContentLoaded', () => {
           ? `// --- Audio ---\ndengan suara ${inputs.backsound.value.trim()}`
           : '',
         inputs.detail.value,
-        inputs.negative.value ? `Hindari : ${inputs.negative.value}` : '',
+        inputs.negative.value
+          ? `// --- Negative Prompt ---\nHindari : ${inputs.negative.value}`
+          : '',
       ];
 
       return promptParts.filter((part) => part && part.trim()).join(',\n');
