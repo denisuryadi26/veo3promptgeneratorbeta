@@ -272,14 +272,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // --- GEMINI API INTEGRATION ---
   async function callGeminiAPI(instruction, imageDataArray = []) {
+    // WARNING: Your API key is exposed here. Move this to a backend server for security.
+    const apiKey = 'AIzaSyDO65JAzRl0aEry-7ftU85nzaqt0EtMw7c';
     // Get API key from config file
-    const apiKey = window.CONFIG?.GOOGLE_API_KEY;
+    // const apiKey = window.CONFIG?.GOOGLE_API_KEY;
 
-    if (!apiKey || apiKey === 'your_google_api_key_here') {
-      throw new Error(
-        'API key tidak ditemukan. Pastikan file config.js sudah dibuat dan berisi API key yang valid.',
-      );
-    }
+    // if (!apiKey || apiKey === 'your_google_api_key_here') {
+    //   throw new Error(
+    //     'API key tidak ditemukan. Pastikan file config.js sudah dibuat dan berisi API key yang valid.',
+    //   );
+    // }
     const model = 'gemini-1.5-flash-latest'; // Using a consistent, recent model
     const parts = [{ text: instruction }];
     imageDataArray.forEach((imgData) => {
