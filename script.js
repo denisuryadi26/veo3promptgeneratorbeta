@@ -1,3 +1,6 @@
+// Prompt Generator - Versi 1.1.0
+// Disimpan pada: Senin, 23 Juni 2025
+
 // Wait for the DOM to be fully loaded before running the script
 document.addEventListener('DOMContentLoaded', () => {
   // --- ELEMENT SELECTORS (Grouped for clarity) ---
@@ -26,12 +29,19 @@ document.addEventListener('DOMContentLoaded', () => {
   );
   const characterList = document.getElementById('characterList');
 
-  const openPlaceCreatorBtn = document.getElementById('openPlaceCreatorBtn');
-  const placeCreatorModal = document.getElementById('placeCreatorModal');
-  const closePlaceCreatorBtn = document.getElementById('closePlaceCreatorBtn');
-  const loadPlaceModal = document.getElementById('loadPlaceModal');
-  const closeLoadPlaceBtn = document.getElementById('closeLoadPlaceBtn');
-  const placeList = document.getElementById('placeList');
+  // --- Scene Mode Selectors ---
+  const singleSceneBtn = document.getElementById('singleSceneBtn');
+  const conversationSceneBtn = document.getElementById('conversationSceneBtn');
+  const singleSceneModeContainer = document.getElementById(
+    'singleSceneModeContainer',
+  );
+  const conversationSceneModeContainer = document.getElementById(
+    'conversationSceneModeContainer',
+  );
+  const sceneCharactersList = document.getElementById('sceneCharactersList');
+  const addSceneCharacterBtn = document.getElementById('addSceneCharacterBtn');
+  const dialogueEditor = document.getElementById('dialogueEditor');
+  const addDialogueLineBtn = document.getElementById('addDialogueLineBtn');
 
   // Manual Prompt Form
   const inputs = {
@@ -53,8 +63,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const generateBtn = document.getElementById('generateBtn');
   const saveCharacterBtn = document.getElementById('saveCharacterBtn');
   const loadCharacterBtn = document.getElementById('loadCharacterBtn');
-  const savePlaceBtn = document.getElementById('savePlaceBtn');
-  const loadPlaceBtn = document.getElementById('loadPlaceBtn');
 
   // Prompt Output & Actions
   const promptIndonesia = document.getElementById('promptIndonesia');
@@ -104,6 +112,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let adOpenedTime = null;
   let singleUploadedImageData = null;
   let characterImageData = { face: null, clothing: null, accessories: null };
+  let currentSceneMode = 'single';
+  let selectedCharacters = [];
+  let dialogueLines = [];
 
   // --- COIN SYSTEM ---
   function saveCoins() {
@@ -260,31 +271,52 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- GEMINI API INTEGRATION ---
-  async function callGeminiAPI(instruction, imageData = null) {
-    const apiKey = 'AIzaSyDO65JAzRl0aEry-7ftU85nzaqt0EtMw7c';
-    const model = 'gemini-1.5-flash-latest';
-    const parts = [{ text: instruction }];
-    if (imageData) {
-      parts.push({
-        inline_data: { mime_type: imageData.type, data: imageData.data },
-      });
+  async function callGeminiAPI(instruction, imageDataArray = []) {
+    // Get API key from config file
+    const apiKey = window.CONFIG?.GOOGLE_API_KEY;
+
+    if (!apiKey || apiKey === 'your_google_api_key_here') {
+      throw new Error(
+        'API key tidak ditemukan. Pastikan file config.js sudah dibuat dan berisi API key yang valid.',
+      );
     }
+    const model = 'gemini-1.5-flash-latest'; // Using a consistent, recent model
+    const parts = [{ text: instruction }];
+    imageDataArray.forEach((imgData) => {
+      if (imgData) {
+        parts.push({
+          inline_data: { mime_type: imgData.type, data: imgData.data },
+        });
+      }
+    });
+
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const payload = { contents: [{ parts: parts }] };
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('API Error Response:', errorBody);
+      const errorBody = await response.json();
+      console.error('Backend API Error Response:', errorBody);
       throw new Error(`API error: ${response.status} ${response.statusText}`);
     }
+
     const result = await response.json();
     const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text) return text.trim();
-    throw new Error('Invalid response from API.');
+
+    if (text) {
+      return text
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+    } else {
+      console.log('No valid response text found, full response:', result);
+      throw new Error('Invalid or empty response structure from API.');
+    }
   }
 
   // --- ACTION HANDLERS ---
@@ -297,8 +329,6 @@ document.addEventListener('DOMContentLoaded', () => {
     createCharacterBtn,
     saveCharacterBtn,
     loadCharacterBtn,
-    savePlaceBtn,
-    loadPlaceBtn,
   ];
   function setActionsDisabled(disabled) {
     allActionButtons.forEach((btn) => {
@@ -331,13 +361,9 @@ document.addEventListener('DOMContentLoaded', () => {
       await apiFunction();
     } catch (error) {
       console.error('API Interaction Error:', error);
-      if (error.message.includes('403')) {
-        alert(
-          "Akses API Ditolak (Error 403: Referer Blocked).\n\nIni karena pembatasan keamanan pada API Key Anda.\n\nCARA MEMPERBAIKI:\n1. Buka Google AI Studio.\n2. Edit API Key Anda.\n3. Di bagian 'Website restrictions', klik 'ADD A WEBSITE'.\n4. Salin dan tempel URL dari pesan error di console (lihat di bawah log ini).",
-        );
-      } else {
-        alert('Terjadi kesalahan. Silakan coba lagi.');
-      }
+      alert(
+        'Terjadi kesalahan saat memproses permintaan. Lihat console untuk detail.',
+      );
       coins += cost; // Refund coins on failure
       saveCoins();
       updateCoinDisplay();
@@ -347,24 +373,155 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // --- SCENE MODE LOGIC ---
+  function switchSceneMode(mode) {
+    currentSceneMode = mode;
+    if (mode === 'single') {
+      singleSceneModeContainer.classList.remove('hidden');
+      conversationSceneModeContainer.classList.add('hidden');
+      singleSceneBtn.classList.replace('bg-gray-600', 'bg-indigo-600');
+      singleSceneBtn.classList.replace(
+        'hover:bg-gray-700',
+        'hover:bg-indigo-700',
+      );
+      conversationSceneBtn.classList.replace('bg-indigo-600', 'bg-gray-600');
+      conversationSceneBtn.classList.replace(
+        'hover:bg-indigo-700',
+        'hover:bg-gray-700',
+      );
+      inputs.kalimat.parentElement.classList.remove('hidden');
+    } else if (mode === 'conversation') {
+      singleSceneModeContainer.classList.add('hidden');
+      conversationSceneModeContainer.classList.remove('hidden');
+      conversationSceneBtn.classList.replace('bg-gray-600', 'bg-indigo-600');
+      conversationSceneBtn.classList.replace(
+        'hover:bg-gray-700',
+        'hover:bg-indigo-700',
+      );
+      singleSceneBtn.classList.replace('bg-indigo-600', 'bg-gray-600');
+      singleSceneBtn.classList.replace(
+        'hover:bg-indigo-700',
+        'hover:bg-gray-700',
+      );
+      inputs.kalimat.parentElement.classList.add('hidden');
+    }
+  }
+
   // --- MANUAL PROMPT LOGIC ---
+  // [MODIFIED] Function now generates prompts for both modes.
   function generateIndonesianPrompt() {
-    let combinedActionExpression = inputs.aksi.value.trim();
+    if (currentSceneMode === 'conversation') {
+      const sceneContextParts = [
+        inputs.tempat.value.trim() ? `di ${inputs.tempat.value.trim()}` : '',
+        inputs.waktu.value.trim() ? `saat ${inputs.waktu.value.trim()}` : '',
+        inputs.pencahayaan.value.trim()
+          ? `dengan pencahayaan ${inputs.pencahayaan.value.trim()}`
+          : '',
+        inputs.suasana.value.trim()
+          ? `suasana ${inputs.suasana.value.trim()}`
+          : '',
+      ].filter(Boolean);
+      const sceneContext =
+        sceneContextParts.length > 0
+          ? `// --- Scene Context ---\n${sceneContextParts.join(', ')}`
+          : '';
+
+      const charactersBlock =
+        selectedCharacters.length > 0
+          ? `// --- Characters in Scene ---\n${selectedCharacters
+              .map((c) => c.description)
+              .join('\n')}`
+          : '';
+
+      const dialogueBlock =
+        dialogueLines.length > 0
+          ? `// --- Dialogue ---\n${dialogueLines
+              .map((d) =>
+                `${d.speaker || 'N/A'}: "${d.line || ''}" ${
+                  d.tone ? `(${d.tone})` : ''
+                }`.trim(),
+              )
+              .join('\n')}`
+          : '';
+
+      const promptParts = [
+        inputs.style.value,
+        inputs.sudutKamera.value,
+        inputs.kamera.value,
+        sceneContext,
+        charactersBlock,
+        dialogueBlock,
+        inputs.backsound.value.trim()
+          ? `// --- Audio ---\ndengan suara ${inputs.backsound.value.trim()}`
+          : '',
+        inputs.detail.value,
+        inputs.negative.value ? `Hindari : ${inputs.negative.value}` : '',
+      ];
+
+      return promptParts.filter((part) => part && part.trim()).join(',\n');
+    }
+
+    // --- Single Scene Logic (Unchanged) ---
+    const subjectValue = inputs.subjek.value.trim();
+    if (subjectValue.includes('// MASTER PROMPT / CHARACTER SHEET')) {
+      const promptParts = [
+        inputs.style.value,
+        inputs.sudutKamera.value,
+        inputs.kamera.value,
+        subjectValue,
+        inputs.aksi.value.trim()
+          ? `// --- Action/Scene ---\n${inputs.aksi.value.trim()}`
+          : '',
+        inputs.ekspresi.value.trim()
+          ? `dengan ekspresi ${inputs.ekspresi.value.trim()}`
+          : '',
+        inputs.tempat.value.trim() ? `di ${inputs.tempat.value.trim()}` : '',
+        inputs.waktu.value.trim() ? `saat ${inputs.waktu.value.trim()}` : '',
+        inputs.pencahayaan.value.trim()
+          ? `dengan pencahayaan ${inputs.pencahayaan.value.trim()}`
+          : '',
+        inputs.suasana.value.trim()
+          ? `suasana ${inputs.suasana.value.trim()}`
+          : '',
+        inputs.backsound.value.trim()
+          ? `dengan suara ${inputs.backsound.value.trim()}`
+          : '',
+        inputs.kalimat.value.trim()
+          ? `mengucapkan kalimat: "${inputs.kalimat.value.trim()}"`
+          : '',
+        inputs.detail.value,
+      ];
+      return promptParts.filter((part) => part && part.trim()).join(',\n');
+    }
+
+    let sceneDescription = `sebuah adegan tentang ${
+      subjectValue || 'seseorang'
+    }`;
+    const action = inputs.aksi.value.trim();
     const expression = inputs.ekspresi.value.trim();
-    if (combinedActionExpression && expression)
-      combinedActionExpression += ` dengan ekspresi ${expression}`;
-    else if (expression) combinedActionExpression = expression;
+    if (action && expression) {
+      sceneDescription += ` yang sedang ${action} dengan ekspresi ${expression}`;
+    } else if (action) {
+      sceneDescription += ` yang sedang ${action}`;
+    } else if (expression) {
+      sceneDescription += ` dengan ekspresi ${expression}`;
+    }
+
     const place = inputs.tempat.value.trim();
+    if (place) {
+      sceneDescription += ` di ${place}`;
+    }
+
     const time = inputs.waktu.value.trim();
-    let locationAndTime =
-      place && time ? `${place} saat ${time}` : place || time;
+    if (time) {
+      sceneDescription += ` saat ${time}`;
+    }
+
     const promptParts = [
       inputs.style.value,
       inputs.sudutKamera.value,
       inputs.kamera.value,
-      inputs.subjek.value,
-      combinedActionExpression,
-      locationAndTime,
+      sceneDescription,
       inputs.pencahayaan.value.trim()
         ? `dengan pencahayaan ${inputs.pencahayaan.value.trim()}`
         : '',
@@ -372,14 +529,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `suasana ${inputs.suasana.value.trim()}`
         : '',
       inputs.backsound.value.trim()
-        ? `suara ${inputs.backsound.value.trim()} dalam Bahasa Indonesia`
+        ? `dengan suara ${inputs.backsound.value.trim()}`
         : '',
       inputs.kalimat.value.trim()
-        ? `kalimat diucapkan dalam Bahasa Indonesia: "${inputs.kalimat.value.trim()}"`
+        ? `mengucapkan kalimat: "${inputs.kalimat.value.trim()}"`
         : '',
       inputs.detail.value,
-      inputs.negative.value ? `Hindari : ${inputs.negative.value}` : '',
     ];
+
     return promptParts.filter((part) => part && part.trim()).join(', ');
   }
 
@@ -429,16 +586,15 @@ document.addEventListener('DOMContentLoaded', () => {
         type === 'subject'
           ? 'Analisis secara spesifik hanya orang/subjek utama dalam gambar ini. Abaikan sepenuhnya latar belakang atau tempat. Berikan deskripsi mendetail dalam Bahasa Indonesia yang mencakup detail wajah, warna dan gaya rambut, pakaian dan aksesoris, warna kulit, dan perkiraan usia. Gabungkan semuanya menjadi satu frasa deskriptif yang kohesif. Balas HANYA dengan frasa deskriptif ini, tanpa teks atau format lain.'
           : 'Anda adalah seorang prompt engineer. Analisis gambar ini dan buatlah deskripsi prompt yang sinematik untuk latar belakangnya dalam Bahasa Indonesia. Fokus pada suasana, elemen visual kunci, dan mood. Abaikan orang atau subjek utama. Balas HANYA dengan deskripsi prompt ini, tanpa teks pembuka.';
-      const description = await callGeminiAPI(
-        instruction,
+      const description = await callGeminiAPI(instruction, [
         singleUploadedImageData,
-      );
+      ]);
       const targetInput = type === 'subject' ? inputs.subjek : inputs.tempat;
       targetInput.value = description;
     });
   }
 
-  // --- CUSTOM CHARACTER CREATOR LOGIC (Modal) ---
+  // --- CUSTOM CHARACTER CREATOR LOGIC ---
   function handleCharacterImageUpload(event, type) {
     const file = event.target.files[0];
     if (!file) return;
@@ -462,95 +618,155 @@ document.addEventListener('DOMContentLoaded', () => {
       alert('Silakan unggah foto Wajah terlebih dahulu di dalam pop-up.');
       return;
     }
+
     handleApiInteraction(createCharacterBtn, 3, async () => {
+      const characterName = prompt(
+        'Masukkan nama untuk karakter ini:',
+        'Karakter Baru',
+      );
+      if (!characterName) {
+        coins += 3;
+        saveCoins();
+        updateCoinDisplay();
+        console.log('Pembuatan karakter dibatalkan.');
+        return;
+      }
+
       const apiPromises = [];
       const selectedStyle = characterStyleSelect.value;
 
-      let faceInstruction;
       const hairInstruction = `Deskripsikan rambut dengan sangat detail, pecah ke dalam kategori berikut:
-- **Warna Rambut:** Warna Dasar (hitam, cokelat, dll.), Highlight & Lowlight, Gradasi & Akar, dan Nada Warna (hangat, dingin).
+- **Warna Rambut:** Warna Rambut (jika warnanya tidak alami tambahkan imbuhan diwarnai).
 - **Tekstur & Pola Rambut:** Tipe Rambut (lurus, bergelombang, ikal, keriting), Detail Tekstur (gelombang longgar/rapat, ikal spiral/besar), Kondisi Helai (tebal/tipis), Kehalusan/Kekusutan (halus, frizzy, flyaways).
-- **Panjang & Potongan Rambut:** Panjang Keseluruhan (sebatas dagu, sebahu, sebatas punggung tengah, sangat panjang), Gaya Potongan (bob, layer, blunt cut), Poni (poni depan, curtain bangs).
+- **Panjang & Potongan Rambut:** Panjang Keseluruhan (sebatas dagu (sekitar 15-25 cm), sebahu (sekitar 25-40 cm), sebatas punggung tengah (sekitar 40-60 cm), sangat panjang (lebih dari 60 cm)), Gaya Potongan/Haircut (bob, pixie, bixie, undercut, comma hair, two block, layer, blunt cut, shaggy), Poni (poni depan, curtain bangs).
 - **Gaya & Penataan Rambut:** Penataan (tergerai, ekor kuda, dikepang), Belahan Rambut (tengah, samping), dan Aksesori (jepit, bando).
 - **Kesan & Karakteristik Unik:** Volume (tebal/kempes), Kilau (berkilau/kusam), dan Detail lain (uban, ujung berwarna).`;
 
+      let vibeInstruction;
+      let styleGuideline = '';
       if (selectedStyle === 'Fiksi') {
-        faceInstruction = `Berdasarkan foto yang diunggah, analisis dan buat deskripsi karakter yang sangat detail dalam format naratif. Mulailah dengan mengidentifikasi subjek sebagai "Seorang Cosplayer (pria/wanita) profesional berusia sekitar (tebak umurnya)". Kemudian, deskripsikan fitur-fitur berikut secara rinci:
-1.  **Bentuk Wajah dan Kepala:** Deskripsikan bentuk wajah secara keseluruhan (oval, bulat, dll.), dahi, bentuk pipi, garis rahang, dan dagu.
-2.  **Mata:** Deskripsikan warna mata (jika warnanya tidak alami, sebutkan sebagai 'kontak lensa berwarna...'), bentuk mata, ukuran mata, bentuk dan ketebalan alis, serta bulu mata.
-3.  **Hidung:** Deskripsikan bentuk dan ukurannya.
-4.  **Mulut:** Deskripsikan ketebalan dan bentuk bibir.
-5.  **Rambut:** ${hairInstruction} (jika warna tidak alami, sebutkan sebagai 'wig berwarna...').
-6.  **Kulit:** Deskripsikan warna kulit (jika tidak alami, sebutkan sebagai 'dengan make up'). Sebutkan juga tanda khusus seperti tahi lalat atau lesung pipi.
-7.  **Rambut Wajah (jika ada):** Deskripsikan jenis dan gayanya.
-Gabungkan semua poin ini menjadi satu paragraf deskriptif yang mengalir secara natural dan mendalam, bukan sebagai daftar. Balas HANYA dengan paragraf deskripsi karakter, tanpa kalimat pembuka apa pun.`;
+        vibeInstruction = `- "vibe": berikan deskripsi kesan atau "vibe" keseluruhan, dan tambahkan kata yang mengandung unsur fantasi (contoh: mystical, ethereal, otherworldly).`;
       } else {
-        // Non Fiksi
-        faceInstruction = `Berdasarkan foto yang diunggah, analisis dan buat deskripsi karakter yang sangat detail dalam format naratif. Pertama, identifikasi negara asal atau etnis yang paling mungkin dari wajah tersebut, lalu tebak jenis kelamin dan perkiraan usianya. Mulailah deskripsi dengan format: "Seorang [jenis kelamin] dari [negara/etnis] berusia sekitar [umur] tahun...". Kemudian, lanjutkan dengan deskripsi fitur berikut:
-1.  **Bentuk Wajah dan Kepala:** Deskripsikan bentuk wajah, dahi, pipi, garis rahang, dan dagu.
-2.  **Mata:** Deskripsikan warna mata, bentuk mata (almond, bulat, monolid, sayu), ukuran, alis, dan bulu mata.
-3.  **Hidung:** Deskripsikan bentuk dan ukurannya.
-4.  **Mulut:** Deskripsikan ketebalan dan bentuk bibir, serta gigi jika terlihat.
-5.  **Rambut:** ${hairInstruction}
-6.  **Kulit:** Deskripsikan warna kulit dan tanda khusus.
-7.  **Rambut Wajah (jika ada):** Deskripsikan jenis dan gayanya.
-PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut atau mata yang tidak alami), ganti dengan padanan realistis yang paling mendekati (contoh: rambut biru menjadi pirang, mata ungu menjadi biru). Gabungkan semuanya menjadi satu paragraf yang natural, bukan daftar. Balas HANYA dengan paragraf deskripsi karakter, tanpa kalimat pembuka.`;
+        vibeInstruction = `- "vibe": berikan deskripsi kesan atau "vibe" keseluruhan, dan pastikan TIDAK ADA kata yang mengandung unsur fantasi (contoh: professional, casual, sporty).`;
+        styleGuideline = `PENTING: Untuk semua deskripsi, gunakan gaya bahasa yang harfiah, objektif, dan apa adanya seperti laporan identifikasi. Hindari penggunaan metafora, perumpamaan, atau bahasa puitis.`;
       }
 
-      apiPromises.push(callGeminiAPI(faceInstruction, characterImageData.face));
+      const faceInstruction = `Berdasarkan gambar wajah yang diunggah, analisis dan kembalikan sebuah objek JSON. Balas HANYA dengan objek JSON, tanpa teks atau format lain.
+${styleGuideline}
+Objek JSON harus memiliki kunci-kunci berikut: "identity", "demeanor", "vibe", "face_shape", "eyes", "nose", "lips", "hair", "skin", "facial_hair".
+- "identity": berikan deskripsi yang berisi jenis kelamin, perkiraan usia, dan asal negara/etnis (Contoh: "Seorang pria berusia 25 tahun dari Korea").
+- "face_shape": berikan deskripsi yang mencakup bentuk wajah secara keseluruhan (oval, bulat, dll.), dahi, bentuk pipi, garis rahang, dan dagu.
+- "eyes": berikan deskripsi yang mencakup warna mata (jika warnanya tidak alami tambahkan imbuhan memakai kontak lensa), bentuk mata, ukuran mata, bentuk dan ketebalan alis, serta bulu mata.
+- "nose": berikan deskripsi yang mencakup Pangkal Hidung, Batang Hidung, Puncak Hidung, Lubang Hidung, Cuping Hidung.
+- "lips": berikan deskripsi yang mencakup ketebalan, bentuk bibir, Proporsi Bibir Atas dan Bawah, Bentuk (Cupid's Bow), Lebar Bibir, Bentuk Sudut Bibir, Definisi Garis Bibir.
+- "hair": berikan satu string tunggal yang merangkum semua detail rambut berdasarkan panduan berikut: ${hairInstruction}.
+- "skin": berikan deskripsi yang mencakup warna kulit (jika tidak alami, sebutkan sebagai 'dengan make up'). Sebutkan juga tanda khusus seperti tahi lalat atau lesung pipi.
+${vibeInstruction}
+- Untuk kunci lainnya ("demeanor", "facial_hair"), berikan deskripsi yang sesuai.`;
+
+      apiPromises.push(
+        callGeminiAPI(faceInstruction, [characterImageData.face]),
+      );
 
       if (characterImageData.clothing) {
-        const clothingInstruction = `Fokus pada pakaian di gambar ini. Deskripsikan secara detail untuk karakter gaya **${selectedStyle}**: jenis pakaian, warna, bahan, pola, dan model potongannya. Balas HANYA dengan frasa deskripsi pakaian ini, tanpa kalimat pembuka.`;
+        let clothingInstruction;
+        if (selectedStyle === 'Fiksi') {
+          clothingInstruction = `Berdasarkan gambar pakaian, analisis dan kembalikan objek JSON dengan kunci "top" dan "bottom". Pastikan deskripsi mengandung unsur fantasi (contoh: jubah ajaib, armor elf). Balas HANYA dengan objek JSON.`;
+        } else {
+          clothingInstruction = `Berdasarkan gambar pakaian, analisis dan deskripsikan sebagai sebuah "pakaian" atau "busana" dalam objek JSON dengan kunci "top" dan "bottom". Balas HANYA dengan objek JSON.`;
+        }
         apiPromises.push(
-          callGeminiAPI(clothingInstruction, characterImageData.clothing),
+          callGeminiAPI(clothingInstruction, [characterImageData.clothing]),
         );
       } else {
-        apiPromises.push(Promise.resolve(null));
-      }
-      if (characterImageData.accessories) {
-        const accessoriesInstruction =
-          'Fokus pada aksesori di gambar ini (topi, kacamata, perhiasan, dll.). Deskripsikan secara detail untuk karakter gaya **${selectedStyle}**: jenis, bahan, dan warnanya. Jika tidak ada, kembalikan string kosong. Balas HANYA dengan frasa deskripsi aksesori ini, tanpa kalimat pembuka.';
-        apiPromises.push(
-          callGeminiAPI(accessoriesInstruction, characterImageData.accessories),
-        );
-      } else {
-        apiPromises.push(Promise.resolve(null));
+        apiPromises.push(Promise.resolve('{}'));
       }
 
-      const [faceDesc, clothingDesc, accessoriesDesc] = await Promise.all(
+      if (characterImageData.accessories) {
+        const accessoriesInstruction = `Berdasarkan gambar aksesori, analisis dan kembalikan objek JSON dengan kunci "accessory". Balas HANYA dengan objek JSON. Jika tidak ada aksesori, nilai harus "none".`;
+        apiPromises.push(
+          callGeminiAPI(accessoriesInstruction, [
+            characterImageData.accessories,
+          ]),
+        );
+      } else {
+        apiPromises.push(Promise.resolve('{}'));
+      }
+
+      const [faceResult, clothingResult, accessoriesResult] = await Promise.all(
         apiPromises,
       );
 
-      let finalDescription = faceDesc || 'seseorang';
-      if (clothingDesc) finalDescription += `, mengenakan ${clothingDesc}`;
-      if (accessoriesDesc && accessoriesDesc.trim() !== '') {
-        finalDescription += `, dengan ${accessoriesDesc}`;
-      }
+      try {
+        const faceData = JSON.parse(faceResult);
+        const clothingData = JSON.parse(clothingResult);
+        const accessoriesData = JSON.parse(accessoriesResult);
 
-      inputs.subjek.value = finalDescription;
-      characterCreatorModal.classList.add('hidden');
+        const finalDescription =
+          `// MASTER PROMPT / CHARACTER SHEET: ${characterName} (v2.0)
+(
+    ${characterName.toLowerCase().replace(/ /g, '_')}:
+    identity: ${faceData.identity || 'not specified'}.
+    demeanor: ${faceData.demeanor || 'not specified'}.
+    vibe: ${faceData.vibe || 'not specified'}.
+
+    // --- Physical Appearance ---
+    face_shape: ${faceData.face_shape || 'not specified'}.
+    eyes: ${faceData.eyes || 'not specified'}.
+    nose: ${faceData.nose || 'not specified'}.
+    lips: ${faceData.lips || 'not specified'}.
+    hair: (${faceData.hair || 'not specified'}:1.2).
+    skin: ${faceData.skin || 'not specified'}.
+    facial_hair: (${faceData.facial_hair || 'none'}:1.5).
+
+    // --- Attire & Accessories ---
+    attire:
+        top: ${clothingData.top || 'not specified'}.
+        bottom: ${clothingData.bottom || 'not specified'}.
+    accessory: (${accessoriesData.accessory || 'none'}:1.3).
+)`.trim();
+
+        inputs.subjek.value = finalDescription;
+        characterCreatorModal.classList.add('hidden');
+      } catch (e) {
+        console.error(
+          'Gagal mem-parsing JSON dari API. Response:',
+          { faceResult, clothingResult, accessoriesResult },
+          'Error:',
+          e,
+        );
+        throw new Error(
+          'Gagal membuat Character Sheet karena respons API tidak valid.',
+        );
+      }
     });
   }
 
-  // --- CHARACTER SHEET LOGIC ---
+  // --- CHARACTER SHEET & DIALOGUE LOGIC ---
   function getSavedCharacters() {
     return JSON.parse(localStorage.getItem('promptGenCharacters')) || [];
   }
 
   function saveCharacter() {
-    const subjectText = inputs.subjek.value.trim();
-    if (!subjectText) {
+    const subject = inputs.subjek.value.trim();
+    if (!subject) {
       alert('Kolom Subjek kosong, tidak ada yang bisa disimpan.');
       return;
     }
 
+    let defaultName = 'Karakter Baru';
+    const nameMatch = subject.match(
+      /\/\/\s*MASTER PROMPT\s*\/\s*CHARACTER SHEET:\s*(.*?)\s*\(v2.0\)/,
+    );
+    if (nameMatch && nameMatch[1]) {
+      defaultName = nameMatch[1].trim();
+    }
+
     const characterName = prompt(
       'Masukkan nama untuk karakter ini:',
-      'Karakter Baru',
+      defaultName,
     );
-    if (!characterName) return; // User cancelled
-
-    const finalDescription = `${characterName}, ${subjectText}`;
+    if (!characterName) return;
 
     const characters = getSavedCharacters();
     const existingIndex = characters.findIndex((c) => c.name === characterName);
@@ -562,23 +778,31 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
       ) {
         return;
       }
-      characters[existingIndex].description = finalDescription;
+      characters[existingIndex].description = subject;
     } else {
-      characters.push({ name: characterName, description: finalDescription });
+      characters.push({ name: characterName, description: subject });
     }
 
     localStorage.setItem('promptGenCharacters', JSON.stringify(characters));
     flashButtonText(saveCharacterBtn, 'Karakter Tersimpan!');
   }
 
-  function loadCharacter() {
+  function populateCharacterModal(mode = 'single') {
     const characters = getSavedCharacters();
-    characterList.innerHTML = ''; // Clear previous list
+    characterList.innerHTML = '';
+
+    const existingFooter = loadCharacterModal.querySelector('.modal-footer');
+    if (existingFooter) {
+      existingFooter.remove();
+    }
 
     if (characters.length === 0) {
       characterList.innerHTML =
         '<p class="text-gray-400">Belum ada karakter yang disimpan.</p>';
-    } else {
+      return;
+    }
+
+    if (mode === 'single') {
       characters.forEach((char, index) => {
         const charEl = document.createElement('div');
         charEl.className =
@@ -608,7 +832,7 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
               'promptGenCharacters',
               JSON.stringify(characters),
             );
-            loadCharacter(); // Refresh list
+            populateCharacterModal(mode);
           }
         };
 
@@ -616,90 +840,160 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
         charEl.appendChild(deleteBtn);
         characterList.appendChild(charEl);
       });
+    } else if (mode === 'conversation') {
+      characters.forEach((char, index) => {
+        const charEl = document.createElement('div');
+        charEl.className = 'flex items-center p-3 bg-gray-700 rounded-lg';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `char-${index}`;
+        checkbox.value = char.name;
+        if (selectedCharacters.some((sc) => sc.name === char.name)) {
+          checkbox.checked = true;
+        }
+        checkbox.className =
+          'h-4 w-4 text-indigo-600 bg-gray-600 border-gray-500 rounded focus:ring-indigo-500';
+
+        const label = document.createElement('label');
+        label.htmlFor = `char-${index}`;
+        label.textContent = char.name;
+        label.className = 'ml-3 block text-sm font-medium text-gray-300';
+
+        charEl.appendChild(checkbox);
+        charEl.appendChild(label);
+        characterList.appendChild(charEl);
+      });
+
+      const footer = document.createElement('div');
+      footer.className = 'modal-footer mt-4 pt-4 border-t border-gray-700';
+      const addButton = document.createElement('button');
+      addButton.textContent = 'Tambahkan ke Adegan';
+      addButton.className =
+        'w-full text-white bg-indigo-600 hover:bg-indigo-700 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors';
+      addButton.onclick = () => {
+        const selectedCheckboxes = characterList.querySelectorAll(
+          'input[type="checkbox"]:checked',
+        );
+        const newSelectedNames = Array.from(selectedCheckboxes).map(
+          (cb) => cb.value,
+        );
+
+        selectedCharacters = characters.filter((char) =>
+          newSelectedNames.includes(char.name),
+        );
+
+        renderSceneCharacters();
+        renderDialogueEditor();
+        loadCharacterModal.classList.add('hidden');
+      };
+
+      footer.appendChild(addButton);
+      loadCharacterModal.querySelector('.bg-gray-800').appendChild(footer);
     }
+
     loadCharacterModal.classList.remove('hidden');
   }
 
-  // -- PLACE LOGIC ---
-  function getSavedPlaces() {
-    return JSON.parse(localStorage.getItem('promptGenPlaces')) || [];
-  }
-
-  function savePlace() {
-    const subjectText = inputs.tempat.value.trim();
-    if (!subjectText) {
-      alert('Kolom Tempat kosong, tidak ada yang bisa disimpan.');
+  // --- Functions for Conversation Mode ---
+  function renderSceneCharacters() {
+    sceneCharactersList.innerHTML = '';
+    if (selectedCharacters.length === 0) {
+      sceneCharactersList.innerHTML =
+        '<p class="text-sm text-gray-400">Belum ada karakter yang ditambahkan.</p>';
       return;
     }
 
-    const placeName = prompt('Masukkan nama untuk tempat ini:', 'Tempat Baru');
-    if (!placeName) return; // User cancelled
-
-    const finalDescription = `${placeName}, ${subjectText}`;
-
-    const places = getSavedPlaces();
-    const existingIndex = places.findIndex((c) => c.name === placeName);
-    if (existingIndex > -1) {
-      if (
-        !confirm(
-          `Tempat dengan nama "${placeName}" sudah ada. Apakah Anda ingin menimpanya?`,
-        )
-      ) {
-        return;
-      }
-      places[existingIndex].description = finalDescription;
-    } else {
-      places.push({ name: placeName, description: finalDescription });
-    }
-
-    localStorage.setItem('promptGenPlaces', JSON.stringify(places));
-    flashButtonText(savePlaceBtn, 'Tempat Tersimpan!');
+    selectedCharacters.forEach((char) => {
+      const charEl = document.createElement('div');
+      charEl.className =
+        'flex items-center justify-between bg-gray-700 px-3 py-2 rounded-lg';
+      charEl.textContent = char.name;
+      sceneCharactersList.appendChild(charEl);
+    });
   }
 
-  function loadPlace() {
-    const places = getSavedPlaces();
-    placeList.innerHTML = ''; // Clear previous list
+  function addDialogueLine() {
+    dialogueLines.push({ speaker: '', line: '', tone: '' });
+    renderDialogueEditor();
+  }
 
-    if (places.length === 0) {
-      placeList.innerHTML =
-        '<p class="text-gray-400">Belum ada karakter yang disimpan.</p>';
-    } else {
-      places.forEach((char, index) => {
-        const charEl = document.createElement('div');
-        charEl.className =
-          'flex justify-between items-center p-3 bg-gray-700 rounded-lg';
+  function removeDialogueLine(index) {
+    dialogueLines.splice(index, 1);
+    renderDialogueEditor();
+  }
 
-        const nameEl = document.createElement('span');
-        nameEl.textContent = char.name;
-        nameEl.className = 'cursor-pointer hover:text-indigo-400';
-        nameEl.onclick = () => {
-          inputs.tempat.value = char.description;
-          loadPlaceModal.classList.add('hidden');
-        };
-
-        const deleteBtn = document.createElement('button');
-        deleteBtn.textContent = 'Hapus';
-        deleteBtn.className =
-          'text-xs bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-2 rounded-full';
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          if (
-            confirm(
-              `Apakah Anda yakin ingin menghapus karakter "${char.name}"?`,
-            )
-          ) {
-            places.splice(index, 1);
-            localStorage.setItem('promptGenPlaces', JSON.stringify(places));
-            loadPlace(); // Refresh list
-          }
-        };
-
-        charEl.appendChild(nameEl);
-        charEl.appendChild(deleteBtn);
-        placeList.appendChild(charEl);
-      });
+  // [MODIFIED] Dialogue editor now saves user input to state
+  function renderDialogueEditor() {
+    dialogueEditor.innerHTML = '';
+    if (selectedCharacters.length === 0) {
+      dialogueEditor.innerHTML =
+        '<p class="text-sm text-gray-400 text-center">Tambahkan karakter terlebih dahulu untuk memulai dialog.</p>';
+      return;
     }
-    loadPlaceModal.classList.remove('hidden');
+
+    dialogueLines.forEach((dialogue, index) => {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'grid grid-cols-1 md:grid-cols-3 gap-2 items-center';
+
+      const speakerSelect = document.createElement('select');
+      speakerSelect.className =
+        'bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5';
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = 'Pilih Pembicara...';
+      speakerSelect.appendChild(defaultOption);
+
+      selectedCharacters.forEach((char) => {
+        const option = document.createElement('option');
+        option.value = char.name;
+        option.textContent = char.name;
+        if (dialogue.speaker === char.name) {
+          option.selected = true;
+        }
+        speakerSelect.appendChild(option);
+      });
+      speakerSelect.onchange = (e) => {
+        dialogueLines[index].speaker = e.target.value;
+      };
+
+      const lineInput = document.createElement('input');
+      lineInput.type = 'text';
+      lineInput.value = dialogue.line;
+      lineInput.placeholder = 'Dialog...';
+      lineInput.className =
+        'md:col-span-2 bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5';
+      lineInput.oninput = (e) => {
+        dialogueLines[index].line = e.target.value;
+      };
+
+      const actionContainer = document.createElement('div');
+      actionContainer.className = 'md:col-span-3 grid grid-cols-3 gap-2';
+
+      const toneInput = document.createElement('input');
+      toneInput.type = 'text';
+      toneInput.value = dialogue.tone;
+      toneInput.placeholder = 'Nada/Ekspresi (opsional)...';
+      toneInput.className =
+        'col-span-2 bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-full p-2.5';
+      toneInput.oninput = (e) => {
+        dialogueLines[index].tone = e.target.value;
+      };
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.textContent = 'Hapus';
+      deleteBtn.className =
+        'col-span-1 text-white bg-red-600 hover:bg-red-700 font-medium rounded-lg text-sm px-4 py-2 text-center';
+      deleteBtn.onclick = () => removeDialogueLine(index);
+
+      actionContainer.appendChild(toneInput);
+      actionContainer.appendChild(deleteBtn);
+
+      lineEl.appendChild(speakerSelect);
+      lineEl.appendChild(lineInput);
+      lineEl.appendChild(actionContainer);
+      dialogueEditor.appendChild(lineEl);
+    });
   }
 
   // --- EVENT LISTENERS INITIALIZATION ---
@@ -726,6 +1020,16 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
     if (fixPromptEnBtn.disabled) return;
     flashButtonText(fixPromptEnBtn, 'Segera Hadir!');
   });
+
+  // --- Scene Mode Listeners ---
+  singleSceneBtn.addEventListener('click', () => switchSceneMode('single'));
+  conversationSceneBtn.addEventListener('click', () =>
+    switchSceneMode('conversation'),
+  );
+  addSceneCharacterBtn.addEventListener('click', () =>
+    populateCharacterModal('conversation'),
+  );
+  addDialogueLineBtn.addEventListener('click', addDialogueLine);
 
   // Listeners for single image description
   imageUploadInput.addEventListener('change', handleSingleImageUpload);
@@ -760,23 +1064,15 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
 
   // Character Sheet Listeners
   saveCharacterBtn.addEventListener('click', saveCharacter);
-  loadCharacterBtn.addEventListener('click', loadCharacter);
+  loadCharacterBtn.addEventListener('click', () =>
+    populateCharacterModal('single'),
+  );
   closeLoadCharacterBtn.addEventListener('click', () =>
     loadCharacterModal.classList.add('hidden'),
   );
   loadCharacterModal.addEventListener('click', (e) => {
     if (e.target === loadCharacterModal)
       loadCharacterModal.classList.add('hidden');
-  });
-
-  // Pace Sheet Listeners
-  savePlaceBtn.addEventListener('click', savePlace);
-  loadPlaceBtn.addEventListener('click', loadPlace);
-  closeLoadPlaceBtn.addEventListener('click', () =>
-    loadPlaceModal.classList.add('hidden'),
-  );
-  loadPlaceModal.addEventListener('click', (e) => {
-    if (e.target === loadPlaceModal) loadPlaceModal.classList.add('hidden');
   });
 
   // Listeners for uploads inside the character creator modal
@@ -823,4 +1119,8 @@ PENTING: Jika Anda mendeteksi fitur yang tidak realistis (seperti warna rambut a
       handleSingleImageUpload({ target: imageUploadInput });
     }
   });
+
+  // Initialize the default view
+  switchSceneMode('single');
+  renderDialogueEditor();
 });
